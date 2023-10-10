@@ -1,0 +1,787 @@
+:PROPERTIES:
+:ID:       3c922a30-cac2-4183-bbcf-7f2d66d707c9
+:END:
+#+title: NGSoneliner
+#+date: <2023-10-22 Sun>
+#+filetags: :blog:publish:
+#+INDEX: pipeline
+#+INDEX: sequencing
+#+INDEX: variant calling
+#+INDEX: alignment
+#+INDEX: shell
+#+PROPERTY: HEADER-ARGS+ :eval no-export
+#+EXCLUDE_TAGS: noexport
+# #+HTML_HEAD_EXTRA: <style> .pseudotitle {font-size: 2em; font-weight: bolder;padding-top:0.4em} </style>
+#+HTML_HEAD_EXTRA: <style> .breakdown {display: flex; flex-direction: column; justify-content: space-between; height: 90%;} </style>
+#+HTML_HEAD_EXTRA: <style> .oneliner {width: 90vw; position: relative; left: calc(-45vw + 50%); font-size:0.6em;display:flex;} </style>
+#+HTML_HEAD_EXTRA: <script>window.addEventListener('DOMContentLoaded', () => { title = document.getElementsByTagName("h3")[0]; title.parentElement.classList.add("oneliner"); title.style.display="none"; title.parentElement.children[2].style.width = "45vw"; title.parentElement.children[3].children[2].classList.add("breakdown"); }); </script>
+
+# Taken from: https://codepen.io/pprakash/pen/oNxNeQE
+#+HTML_HEAD_EXTRA: <script>function Marquee(selector, speed) {const parentSelector = document.querySelector(selector); const clone = parentSelector.innerHTML; const firstElement = parentSelector.children[0]; let i = 0; console.log(firstElement); parentSelector.insertAdjacentHTML('beforeend', clone); parentSelector.insertAdjacentHTML('beforeend', clone); marqueeinterval = setInterval(function () {firstElement.style.marginLeft = `-${i}px`; if (i > firstElement.clientWidth) {i = 0;} i = i + speed;}, 0);} </script>
+#+HTML_HEAD_EXTRA: <script>function stopMarquee(selector) {const parentSelector = document.querySelector(selector); clearInterval(marqueeinterval); parentSelector.removeChild(parentSelector.children[0]); parentSelector.removeChild(parentSelector.children[1]); parentSelector.children[0].style.overflow="auto";} </script>
+#+HTML_HEAD_EXTRA: <script>window.addEventListener('DOMContentLoaded', () => { title = document.getElementsByTagName("h2")[2]; title.parentElement.children[2].children[0].style.display="none";mydiv = title.parentElement.children[2].children[1]; mydiv.classList.add("oneliner", "marquee"); mydiv.style.overflow = "hidden"; Marquee(".marquee", 0.2); }); </script>
+
+#+OPTIONS: toc:nil
+
+#+begin_dateauthor
+22 Oct 2023 — Barış Salman
+#+end_dateauthor
+
+#+TOC: headlines 3
+
+* Sequence pipeline oneliner
+
+#+html:<label for="sn-symbol" class="sidenote-toggle">⊕</label>
+#+html:<input type="checkbox" id="sn-symbol" class="sidenote-toggle">
+#+begin_sidenote
+[[edraw:data=H4sIAIObJWUAA72U7W6CMBSGb6Wpf7ZE6YdY0VivgF0ESlcaGTWlE7z7tRTm4pRkmuxHeVN6zvucU0o39UmC9qOsag4La49rhJqmiZp5pI1EFGOMXAQMIeu2VNXhViBZrVaoW4WgUbktOJwnGIJCKFlYDglzk5MwtdKVm0UEbjdG7C1oOXQr5+55N1HlHIrcZM1sl+0P0ujPKoegtkYfBIeVrgQE76osOTRyl73QxWI6DPwKAdpu5E8PnZ8HvM+a6WO2V9bXEMUXMr1UROJQo3/VBjFuSry2QQN+IigWWFzXhu7TbjXx7XINGSmNhdIIxv+C6zg+LBnhLUYt4uDA7m8meV8ud7+KHqHd7G5w+UN3Sd9c/MBmPoAjw7migXfMbNGbz/pQdqFNGGMDLZDdyX5zf+o0xqkX9oRL7NNTL8kTLolPT70M5/ERmznt8tNOn9gad4VMKU699B8USTfctbb9Aird8Sz+BAAA][logo]]
+#+end_sidenote
+
+We can sequence genomes chunk by chunk.
+This sequencing creates millions of these "short reads" which we need to assembly back into a genome or align back to a reference if we already done the assembly before.
+There are different approaches to both of this and this post concerned with the latter.
+
+This process is performed by various tools and in many steps with a lot of commands.
+There have been a lot of work put in to making this process more streamlined with workflow managers.
+
+This is not one of them.
+
+Purpose of this exercise is to investigate shell pipes and is purely educational.
+As I start building and testing the pipeline I had a few problems as well as questions but first lets look at the command itself.
+
+** Oneliner
+*** Pipeline
+
+#+BEGIN_SRC sh -r :noweb yes
+<<oneliner>>
+#+END_SRC
+
+*** Breakdown
+
+**** Preprocessing fastq
+[[(fastp)][fastp]] with the =--stdout= parameter writes interleaved output. We are just using default operations.
+Because of [[Different number of variants][different results]] its commented out and not being used.
+
+**** Alignment
+[[(bwa)][bwa]] can take interleaved input from stdin with `-p` option. This was used to get the input from fastp stdout.
+We are just starting from bwa by giving the both fastq files as inputs.
+
+**** Processing aligned reads
+Samtools [[(samtools_collate)][collate]], [[(samtools_fixmate)][fixmate]], [[(samtools_sort)][sort]], [[(samtools_markdup)][markdup]] submodules are used.
+We use samtools to mark duplicate reads.
+http://www.htslib.org/doc/samtools-markdup.html
+[[(samtools_markdup)][markdup]] has a conditional check beforehand for a variable named =AMPLICON= which if true skips the markdup and just cats the alignments.
+
+**** Writing out the alignment file
+[[(samtools_view)][samtools view]] is used to convert the bam file to cram.
+We can use [[(tee_cram)][tee]] to write out the cram file while passing it down the pipeline.
+
+**** Variant calling
+[[(bcftools_mpileup)][mpileup]] has =-d 10000 -L 10000= parameters in case there are high depth amplicon sequencing.
+Beware the [[pv]] commands before the [[(bcftools_call)][call]].
+
+**** Post processing variants
+Check out [[Why is it taking too long?][this section]] to understand rationale behind this [[(bcftools_view)][view]] command.
+[[https://genome.sph.umich.edu/wiki/Variant_Normalization][Variant normalization]] is performed by [[(bcftools_norm)][bcftools norm]].
+In [[(bcftools_fill-tags)][fill-tags]] command the specific tag I need is the variant allele fraction (VAF).
+We later use the VAF with [[(bcftools_setGT_1)][setGT heterozygous]] and [[(bcftools_setGT_2)][setGT homozygous]] commands.
+
+We are using -Ov [[(bcftools_setGT_2)][before the VEP command]] because I had problem with VEP reading compressed from stdin.
+https://github.com/Ensembl/ensembl-vep/issues/1502
+
+**** annotating variants
+A bare bone [[(vep)][vep]] command. This brings a lot of annotation with the =--everything== flag.
+
+**** filtering variants
+Here we use [[(split-vep_1)][split-vep]] and add some of the columns we're interested in into the INFO column before filtering.
+Filtering expressions depends on what we're trying to achieve, I just put the ones I like.
+[[(filter_OnTarget)]] [[(filter_LowQual)]] [[(filter_Freq)]] [[(filter_Impact)]] [[(filter_HomRare)]] [[(filter_HetNovel)]]
+
+Here no variant is excluded but the tags we give with the =-s= parameters are appended to the =FILTER= column.
+After the filtering we [[(tee_bcf)][write bcf]] with the =tee= command.
+
+**** writing out a tsv file
+We define the columns we want to have in the final table [[(columns)][columns]] and use [[(split-vep_2)][split-vep]] to format it into a table.
+We can add these columns as the first line with [[(awk)][awk]] after we format it as a [[(header)][header]].
+We can than use [[(gzip)][gzip]] to keep it compressed.
+
+** Results and highlights
+As result [[file:multiqc_report.html][this report]] is created with multiqc.
+It would be better make a hard filtered vcf and create the report that one but since this test already has small number of variants it wasn't required.
+
+- Test the command by running it multiple times.
+- Count the data in intermediary steps (md5sum, mapped and paired reads, number of variants etc.).
+
+** Auxiliary tasks and Embellishments
+*** setting up the environment
+
+These are the variable we later use in the pipeline.
+We can change [[(R1)][R1]] and [[(R2)][R2]] and [[(sample)][sample]] for changing the input.
+We can edit [[(columns)][columns]] to customize the output.
+
+Assembly is used in the [[(vep)][VEP]] command and if we want to use GRCh37 we need to [[(vep_install)][install the GRCh37 cache]] and also need to change the [[(reference)][reference genome]].
+
+#+name: setting_environment
+#+begin_src sh -r
+
+BASEDIR=$(dirname "$(realpath "$0")")
+
+THREADS=16 (ref:threads)
+ASSEMBLY="GRCh38" (ref:assembly)
+REFERENCE="$HOME/reference/GRCh38/Homo_sapiens_assembly38.fasta" (ref:reference)
+TARGET="$HOME/reference/GRCh38/hg38.refGene.exon.bed"
+AMPLICON="NO"
+
+R1="$HOME/sample/U0a_CGATGT_L001_R1_005.fastq.gz" (ref:r1)
+R2="$HOME/sample/U0a_CGATGT_L001_R2_005.fastq.gz" (ref:r2)
+SAMPLE="U0a" (ref:sample)
+
+OUTPUT_DIR="results.$$"
+
+OUTPUT="$OUTPUT_DIR/$SAMPLE"
+columns="[%SAMPLE]\t%CHROM\t%POS\t%REF\t%ALT\t%ID\t%FILTER[\t%GT\t%VAF\t%AD\t%DP]\t%Consequence\t%IMPACT\t%SYMBOL\t%Feature\t%EXON\t%INTRON\t%HGVSc\t%HGVSp\t%cDNA_position\t%CDS_position\t%Protein_position\t%Amino_acids\t%Codons\t%Existing_variation\t%MANE_SELECT\t%MANE_PLUS_CLINICAL\t%GENE_PHENO\t%SIFT\t%PolyPhen\t%DOMAINS\t%AF\t%gnomADe_AF\t%gnomADg_AF\t%MAX_AF\t%MAX_AF_POPS\t%CLIN_SIG\t%PHENO\t%PUBMED\t%CANONICAL\n" (ref:columns)
+header=$(echo "$columns" | sed "s/%//g;s/\[//g;s/\]//g") (ref:header)
+
+mkdir -p "$OUTPUT_DIR"
+
+cp "$0" "$OUTPUT_DIR" (ref:copy_script)
+
+#+end_src
+
+Here we [[(copy_script)][copy the script]] to result directory to log the command we are running.
+
+
+*** software versions
+Multiqc can show these in a neat table. We just need some formating.
+
+#+name: getting_versions
+#+begin_src shell
+{
+    printf 'oneliner: "%s"\n' "$VERSION";
+    printf 'fastp: "%s"\n' "$(fastp 2>&1 | grep version | cut -d " " -f 2)"
+    printf 'bwa: "%s"\n' "$(bwa 2>&1 | grep Version | cut -d: -f2)"
+    printf 'samtools: "%s"\n' "$(samtools version | sed 1q | cut -d " " -f 2)"
+    printf 'bcftools: "%s"\n' "$(bcftools version | sed 1q | cut -d " " -f 2)"
+    printf 'ensembl-vep: "%s"\n' "$(~/ensembl-vep/vep | grep ensembl-vep | cut -d : -f 2)"
+    printf 'bedtools: "%s"\n' "$(bedtools --version | cut -d " " -f2)"
+    (
+        echo "annotation_sources:"
+        ~/ensembl-vep/vep --show_cache_info | sed 's/\s/: "/;s/$/"/;s/^/    /'
+    )
+} > "$OUTPUT_DIR"/oneliner_mqc_versions.yaml
+#+end_src
+
+
+*** Getting the stats and creating reports
+IGV-reports create easy to browse variant list with alignments. We can add this html to our final html report.
+At last the multiqc brings all together with custom plots and software versions.
+
+#+name: getting_stats
+#+BEGIN_SRC sh
+samtools index -@ $THREADS "$OUTPUT.cram"
+bcftools index "$OUTPUT.bcf"
+
+. ~/venv/bin/activate
+
+create_report "$OUTPUT".bcf \
+    http://igv-genepattern-org.s3.amazonaws.com/genomes/seq/hg38/hg38.fa \
+    --genome hg38 --flanking 1000 \
+    --sample-columns GT AD DP VAF \
+    --info-columns SYMBOL gnomADg_AF IMPACT Existing_variation \
+    --tracks "$OUTPUT".cram --output "$OUTPUT"_mqc.html
+
+samtools stats --reference "$REFERENCE" "$OUTPUT.cram" >"$OUTPUT.cram.stats"
+samtools idxstats "$OUTPUT.cram" >"$OUTPUT.cram.idxstats"
+samtools flagstat "$OUTPUT.cram" >"$OUTPUT.cram.flagstat"
+bcftools stats "$OUTPUT.bcf" >"$OUTPUT.bcf.stats"
+"$BASEDIR"/plot_resource_usage.R "$OUTPUT_DIR"
+multiqc -f -s -o "$OUTPUT_DIR" "$OUTPUT_DIR"
+#+END_SRC
+
+
+*** pv
+[[(pv)][pipe viewer]] is a command line utility that can show a progress bar as data pipe through it.
+In its manual it uses -s (size) option with `du` command, in our case since our data is compressed we use `gzip -l`.
+After the first `pv`, it is harder to find out the amount of data passing through so others won't be accurate but it can still be used to show how much time is passed. Its =-S= parameter should not be used since it will stop the input prematurely.
+
+They're commented out because my shell acts weird after the command finishes.
+
+
+*** Monitoring the resource usage
+We can start this process in background before the pipeline starts.
+This gets cpu, memory percentages with `ps` command and file sizes with `du` command every 5 seconds.
+
+#+name: monitor_resource_usage
+#+begin_src sh
+monitor_resources() {
+    while ps $$ >/dev/null; do
+        du -b $OUTPUT_DIR/* | sed "s#^#$(date +%Y/%m/%d/%H:%M:%S) #" >>"$OUTPUT_DIR/file_sizes.$$.log"
+        ps --ppid $$ --forest --no-heading -o %cpu,%mem,cmd 2>/dev/null |
+            cut -d " " -f 1-6 |
+            sed "s#^#$(date +%Y/%m/%d/%H:%M:%S) #" |
+            grep -v "CMD\|pv\|ps" |
+            awk '{print $4"_"$5"\t"$1"\t"$2"\t"$3}' >>"$OUTPUT_DIR/resources.$$.log"
+        sleep 5
+    done
+}
+monitor_resources &
+#+end_src
+
+**** Plotting the resource usage and file sizes
+This script creates the [[fig:resource_usage][resource usage]] [[fig:file_sizes][file sizes]] plots using the metrics created at [[Monitoring the resource usage][above]] section.
+These images can later be included in the multiqc report.
+
+#+begin_details
+#+begin_src R :tangle plot_resource_usage.R :shebang #!/usr/bin/env -S Rscript --vanilla :comments both
+
+library(ggplot2)
+
+args = commandArgs(trailingOnly=TRUE)
+
+if (length(args)==0) {
+  run_dir <- "."
+} else if (length(args)==1) {
+  run_dir <- args[1]
+}
+
+num_x_ticks <- 66
+
+plot_resource_usage <- function(log_path) {
+  data <- read.table(log_path)
+  mem <- data[c("V1", "V2", "V4")]
+  mem$V5 <- "CPU"
+  cpu <- data[c("V1", "V2", "V3")]
+  cpu$V5 <- "MEM"
+
+  colnames(mem) <- c("cmd", "time", "percent", "type")
+  colnames(cpu) <- c("cmd", "time", "percent", "type")
+
+  data <- rbind(cpu, mem)
+
+  major_tasks <- c(
+    "bwa_mem",
+    "samtools_sort",
+    "bcftools_mpileup",
+    "samtools_markdup",
+    "vep"
+  )
+  data <- data[grepl(paste(major_tasks, collapse = "|"), data$cmd), ]
+
+  data$time <- as.POSIXct(data$time, format = "%Y/%m/%d/%H:%M:%S")
+
+  date_breaks <- paste(
+    signif(
+      as.numeric(
+        difftime(max(data$time), min(data$time), units = "secs") / num_x_ticks
+      ),
+      2
+    ),
+    "sec"
+  )
+
+  ggplot(
+    data,
+    aes(x = time, y = percent, color = cmd, group = cmd, linetype = cmd)
+  ) +
+    facet_wrap(~type, nrow = 2) +
+    geom_line() +
+    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1)) +
+    ggtitle(log_path) +
+    scale_linetype_manual(values = rep(c(
+      "solid", "longdash", "twodash",
+      "dashed", "dotdash", "dotted", "solid"
+    ), 3)) +
+    scale_x_datetime(date_breaks = date_breaks)
+}
+
+
+plot_file_sizes <- function(log_path) {
+  num_x_ticks <- 67
+  data <- read.table(log_path)
+  colnames(data) <- c("time", "size", "file")
+  data$time <- as.POSIXct(data$time, format = "%Y/%m/%d/%H:%M:%S")
+
+  major_files <- c("cram$", "bcf$", "tsv$")
+
+  data <- data[grepl(paste(major_files, collapse = "|"), data$file), ]
+
+  date_breaks <- paste(
+    signif(
+      as.numeric(
+        difftime(max(data$time), min(data$time), units = "secs") / num_x_ticks
+      ),
+      2
+    ),
+    "sec"
+  )
+
+  ggplot(
+    data,
+    aes(x = time, y = size, color = file, group = file, linetype = file)
+  ) +
+    geom_line() +
+    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1)) +
+    ggtitle(log_path) +
+    scale_linetype_manual(
+      values = rep(c(
+        "solid", "longdash", "twodash",
+        "dashed", "dotdash", "dotted", "solid"
+      ), 3)
+    ) +
+    scale_x_datetime(date_breaks = date_breaks)
+}
+
+
+my_files <- list.files(path = run_dir, pattern = "^resources.*\\.log$", full.names = T)
+for (i in my_files) {
+  plot_resource_usage(i)
+  ggsave(paste(i, "_mqc.png", sep = ""), width = 14, height = 7)
+}
+
+my_files <- list.files(path = run_dir, pattern = "^file_sizes.*\\.log$", full.names = T)
+for (i in my_files) {
+  plot_file_sizes(i)
+  ggsave(paste(i, "_mqc.png", sep = ""), width = 14, height = 7)
+}
+
+#+end_src
+#+end_details
+
+** Running and testing the pipeline
+
+Each tool of the pipe should be tested individually and commands parameters should be given attention in detail.
+In particular, samtools' stdin and stdout can be tricky to get right in the first try.
+
+Comparing the output created running the commands in distinct steps and as pipe makes sure pipeline itself not causing any side effects.
+
+Running the pipeline multiple times is also an indispensable test to make sure it is reliable.
+I noticed different variant counts in earlier tests because of the wrong parameter of =pv= (I used -S that would end the buffer prematurely).
+
+I did the initial setting up and making sure that pipeline runs with super small subset of the FASTQ files.
+
+#+begin_example
+zcat U0a_CGATGT_L001_R1_005.fastq.gz | sed 200q > Test_CGATGT_L001_R1_005.fastq.gz
+zcat U0a_CGATGT_L001_R2_005.fastq.gz | sed 200q > Test_CGATGT_L001_R2_005.fastq.gz
+#+end_example
+
+I did the test runs ten at a time.
+
+#+name: test_batch
+#+begin_example
+cd /home/bar/runs/
+for i in {1..10}; do ../oneliner.sh; done
+#+end_example
+
+*** Should this be a single pipeline?
+I would assume no.
+We have random reads coming from the fastq file and we should wait for alignment process to complete before going on with the variant calling.
+*However, this doesn't happen because I assume `samtools sort` buffers the whole thing while sorting.*
+
+#+CAPTION: If we would be calling variants while aligning it might cause something like this.
+[[edraw:data=H4sIAPypI2UAA81YbW+jOBD+K5b7ZU8KAduQwCpE6nW7d5G6Va+NdvfuGwmGoKYQGdpk99efDXZIeNF2pViJ1HbqQGbmGXuemfEkf4vB7mWd5h936yR99uGqKDYfTXO73Q63ZJix2ESe55nlU1i92vUStizL5Mog2CZhsfKhY1kQrGgSrwq+wHzxRlmeZKkP0RDB6SSkUQ6S0Ic0ZMHWEEv+6UvAnik7/tywjICxbAtB9fRbZWGk1n9LK9YYgg2jOWVv9Drf0GXxGBRJ5sM0Sym3n9Dtn9nOhwaygPjF4gcCRqPvPsQDUv77L9cDQcYSmnKVwWuRQZAXLHumSk+UrNc+vIoWtkds7vImKFaA+/uF6xwYY6F6MAb2wPoPAnM6MSsn+T8C4nTCuF9gV1r5Uf7tDZgy5EVOyKHVMVkEy+eYZa9pWFqIDx9l4Q8ojYjvG9kmWCaFsDQktX5s1YbxqHLF5mInHzG+RkLuKildWbiLBR41A8JdKOiuEDoQcUolbv0djDEE4rkRpMtVxnz4koThWgQySwsjT35yRciVyyh4SdZcUR6kucF3Mong9PP10/yfiSl0SGTK/pVLAsdzYQMqUh4efbTHPqqxI1xhRxK8jXqxR4sILcdVwI/c6LDb65k1dPYK1RtNe/Ue7d10Ky/JqPJSCBX0U0W51D8elfoRPwLTRxqEYKTCbsZnhI01wyZN2M4lwMauXtjYa8K2D2GrlJZngjjohCn9NWBJkBbK3tlCbGsOsdMMMbmIk2Vpho2asPE7Yf8aZSsw/TDRAV02g6MDNmrRJ2rAPveGE1vzjhP3oioHkhRaVhAtWy45VFTmCyod6uQTS/NRFweqo3acDbfqYV1duCWhiwN1QYSOZIeEdTE6ki0S+W1G14tb8hrWxWtI8hp2Oynd7ANuDXEbqX0QDTk97rG5B/PY8VkuObt3Jqm0mL1uOJ0Br92groW8zhBj6Yek0HLZ54bUcjAISl7EY3LCrvGRRpTRdEnVHpSjtwQt3bbVrYBBUz4Vv7L1h6vWTcIfsBzYiWMNXOtOCJ5BSt5ICUpp76UCUg29rZ08AE9qcjwd+Ou72V/3X27v52B2Dz7Nnuaz+5s5eJrfPjx1zsb1ZUXjDqAxy/dnW/uKgKh801VX1Cgmpo3mkNCfaK296Mi8Rsb0oW7nod3onfoTrZVV/VSn3ngH1ak8JPZBImqJvVPnbDvVtI2fZUk5OtwPs4fbc0+Gate1dRI2ushOgii613bZ4l1kJ6Gu1rR1EupuraeTUKXDVp376JS1Q9jLQcAoDyLXCYJ1EqdJGh/V0XeVzVax7eReVX1UkeXcVVZX4u7ljZRldeXZpmR1Zy56q/wtnv4PsALV0aAYAAA=][fastq-vcf]]
+
+While testing with a smaller subset running in pipe and distinct steps gives the same number of resulting variants.
+However, when we remove the `samtools sort` I got no variants which in concordance with my initial hunch.
+This would need more thorough testing to be sure like showing bwa and bcftools running at the same time (but i didn't keep those stats).
+
+#+begin_example
+bar@debiantestin:~/runs$ ls -1 results.*/Test.*.bcftools.log | xargs grep '^Lines'
+
+Seperate Steps
+results.234225/Test.234225.bcftools.log:Lines   total/split/joined/realigned/skipped:   20/0/0/0/0
+
+Pipe no samtools sort
+results.235225/Test.235225.bcftools.log:Lines   total/split/joined/realigned/skipped:   0/0/0/0/0
+
+Pipe
+results.70416/Test.70416.bcftools.log:Lines   total/split/joined/realigned/skipped:     20/0/0/0/0
+
+#+end_example
+
+*** Why is it taking too long?
+  This is not a pipe related concern but after setting up the pipe and running with relatively larger data which is still around 500Mb it took 15 hours.
+
+#+caption: Graph showing CPU and Memory usage over time.
+#+name: fig:resource_usage
+ [[edraw:file=resources.svg][Resource usage]]
+
+#+caption: Plot showing file sizes over time.
+#+name: fig:file_sizes
+ [[edraw:file=file_sizes.svg][File sizes]]
+
+BWA completes about less than 10 minutes.
+In this time the first chunk of the alignments are written about 60-70 Mb, then alignments are written incrementally until sort and mpileup finishes.
+
+Investigating further I found we are calling anything and everything; half a million variants in the file. Target intervals only includes 13007 of them which only 7 has depth and quality bigger than 5.
+#+begin_example
+bar@debiantestin:~/runs/results.89097$ bcftools view U0a.bcf -H | wc -l
+532845
+bar@debiantestin:~/runs/results.89097$ bcftools view U0a.bcf -i 'FORMAT/DP>1' -H | wc -l
+70674
+bar@debiantestin:~/runs/results.89097$ bcftools view U0a.bcf -i 'FORMAT/DP>20' -H | wc -l
+2408
+bar@debiantestin:~/runs/results.89097$ bcftools view U0a.bcf -i 'FORMAT/DP>20&&QUAL>20' -H | wc -l
+2080
+bar@debiantestin:~/runs/results.89097$ bcftools view U0a.bcf -i 'FORMAT/DP>20&&QUAL>100' -H | wc -l
+1288
+bar@debiantestin:~/runs/results.89097$ bcftools view U0a.bcf  -H -T /home/bar/reference/GRCh38/hg38.refGene.exon_padding.bed |wc -l
+13007
+bar@debiantestin:~/runs/results.89097$ bcftools view U0a.bcf -i 'FORMAT/DP>5&&QUAL>5' -H -T /home/bar/reference/GRCh38/hg38.refGene.exon_padding.bed |wc -l
+7
+#+end_example
+
+After filtering for target region and the depth and quality we get it down to 15 minutes.
+For some reason target region overlaps low quality variants.
+
+How much of the variants filtered effects the time it tooks to complete the pipeline.
+Biggest time concern after eliminating variant count would be the VEP.
+It takes around ~15 mins to annote 7 variants.
+Runing the VEP by itself takes only around 15 secs.
+Meaning there are some other bottlenecks.
+
+We utilize more of the system resources passing around the [[(threads)][$THREADS]] variable but it would be more interesting challenge to scale this pipeline [[https://www.geeksforgeeks.org/horizontal-and-vertical-scaling-in-databases/][horizontally]].
+
+*** Different number of variants
+
+#+html:<label for="sn-symbol" class="sidenote-toggle">⊕</label>
+#+html:<input type="checkbox" id="sn-symbol" class="sidenote-toggle">
+#+begin_sidenote
+#+begin_src sh
+bwa mem -t "$THREADS" -R "@RG\tID:$SAMPLE\tSM:$SAMPLE\tPL:illumina\tLB:lib1\tPU:foo" "$REFERENCE" "$R1" "$R2" 2>"$OUTPUT.$$.bwa.log" > "$OUTPUT.sam"
+    # pv -cN bwa |
+samtools collate -@ "$THREADS" -o "$OUTPUT.collated.bam" "$OUTPUT.sam"
+samtools fixmate -@ "$THREADS" -m "$OUTPUT.collated.bam" "$OUTPUT.fixmate.bam"
+samtools sort -@ "$THREADS" "$OUTPUT.fixmate.bam" -o "$OUTPUT.sorted.bam"  -O bam
+samtools markdup -@ "$THREADS" "$OUTPUT.sorted.bam" "$OUTPUT.markdup.bam"
+    # ([ "$AMPLICON" = "NO" ] && samtools markdup -@ "$THREADS" - - || cat) |
+    # pv -cN samtools_markdup |
+
+bcftools mpileup --threads "$THREADS" -Ou -A -T "$TARGET" -d 10000 -L 10000 -a "FORMAT/AD,FORMAT/DP" -f "$REFERENCE" "$OUTPUT.markdup.bam" 2>>"$OUTPUT.$$.bcftools.log" |
+#+end_src
+
+Disassembled commands. =tee= can also be used.
+#+end_sidenote
+
+Even after going through [[Should this be a single pipeline?][this section]] I had different number of variants while running the pipeline.
+It would result in 6, 7 or 8 variants in every [[test_batch][ten batches]] of my test runs.
+Debuging this was like disassembling an engine and testing each part individually.
+Variants are counted by [[(bcftools_norm)][bcftools norm]] step.
+So whatever was happening before this step.
+I worked my way up the ladder.
+
+I had 10 different runs with various number of variants.
+I first make sure [[(bcftools_mpileup)][bcftools mpileup]] and [[(bcftools_call)][bcftools call]] worked correctly by running it ten times for different number of variant called runs.
+It produced the same output from every time whether it was 6, 7 or 8 variants.
+So it was something upstream.
+
+I separated each command before and checked the stats.
+#+begin_src sh
+for bam in $(find -type f -name "*.*am"); do echo $bam; samtools stats $bam > $bam.stats; done
+find -type f -name "*.stats" | xargs grep -Ri "reads mapped and paired"
+#+end_src
+
+#+begin_example
+./results.148485/U0a.sorted.bam.stats:SN        reads mapped and paired:        4229234 # paired-end technology bit set + both mates mapped
+./results.148485/U0a.markdup.bam.stats:SN       reads mapped and paired:        4229234 # paired-end technology bit set + both mates mapped
+./results.148485/U0a.sam.stats:SN       reads mapped and paired:        4229234 # paired-end technology bit set + both mates mapped
+./results.148485/U0a.collated.bam.stats:SN      reads mapped and paired:        4229234 # paired-end technology bit set + both mates mapped
+./results.148485/U0a.fixmate.bam.stats:SN       reads mapped and paired:        4229234 # paired-end technology bit set + both mates mapped
+./results.159805/U0a.sorted.bam.stats:SN        reads mapped and paired:        4229234 # paired-end technology bit set + both mates mapped
+./results.159805/U0a.markdup.bam.stats:SN       reads mapped and paired:        4229234 # paired-end technology bit set + both mates mapped
+./results.159805/U0a.sam.stats:SN       reads mapped and paired:        4229234 # paired-end technology bit set + both mates mapped
+./results.159805/U0a.collated.bam.stats:SN      reads mapped and paired:        4229234 # paired-end technology bit set + both mates mapped
+./results.159805/U0a.fixmate.bam.stats:SN       reads mapped and paired:        4229234 # paired-end technology bit set + both mates mapped
+./results.155247/U0a.sorted.bam.stats:SN        reads mapped and paired:        4229236 # paired-end technology bit set + both mates mapped
+./results.155247/U0a.markdup.bam.stats:SN       reads mapped and paired:        4229236 # paired-end technology bit set + both mates mapped
+./results.155247/U0a.sam.stats:SN       reads mapped and paired:        4229236 # paired-end technology bit set + both mates mapped
+./results.155247/U0a.collated.bam.stats:SN      reads mapped and paired:        4229236 # paired-end technology bit set + both mates mapped
+./results.155247/U0a.fixmate.bam.stats:SN       reads mapped and paired:        4229236 # paired-end technology bit set + both mates mapped
+./results.150020/U0a.sorted.bam.stats:SN        reads mapped and paired:        4229234 # paired-end technology bit set + both mates mapped
+./results.150020/U0a.markdup.bam.stats:SN       reads mapped and paired:        4229234 # paired-end technology bit set + both mates mapped
+./results.150020/U0a.sam.stats:SN       reads mapped and paired:        4229234 # paired-end technology bit set + both mates mapped
+./results.150020/U0a.collated.bam.stats:SN      reads mapped and paired:        4229234 # paired-end technology bit set + both mates mapped
+./results.150020/U0a.fixmate.bam.stats:SN       reads mapped and paired:        4229234 # paired-end technology bit set + both mates mapped
+./results.162839/U0a.sorted.bam.stats:SN        reads mapped and paired:        4229234 # paired-end technology bit set + both mates mapped
+./results.162839/U0a.markdup.bam.stats:SN       reads mapped and paired:        4229234 # paired-end technology bit set + both mates mapped
+./results.162839/U0a.sam.stats:SN       reads mapped and paired:        4229234 # paired-end technology bit set + both mates mapped
+./results.162839/U0a.collated.bam.stats:SN      reads mapped and paired:        4229234 # paired-end technology bit set + both mates mapped
+./results.162839/U0a.fixmate.bam.stats:SN       reads mapped and paired:        4229234 # paired-end technology bit set + both mates mapped
+./results.156764/U0a.sorted.bam.stats:SN        reads mapped and paired:        4229234 # paired-end technology bit set + both mates mapped
+./results.156764/U0a.markdup.bam.stats:SN       reads mapped and paired:        4229234 # paired-end technology bit set + both mates mapped
+#+end_example
+
+samtools outputs where consistent in itself as it showed same counts in each run but 155247 in particular had totally different counts.
+Pointing there was something before or during the alignment.
+
+Next I checked the fastq files produced by fastp.
+#+begin_src sh
+ find -type f -name "*.fq.gz"  | xargs md5sum
+#+end_src
+
+#+begin_example
+a90dd1e71c9e5432e8b67a54e65424a1  ./results.148485/U0a.fq.gz
+a90dd1e71c9e5432e8b67a54e65424a1  ./results.159805/U0a.fq.gz
+8f716b9f65748efdb3f30ba7d7794d4d  ./results.155247/U0a.fq.gz
+a90dd1e71c9e5432e8b67a54e65424a1  ./results.150020/U0a.fq.gz
+a90dd1e71c9e5432e8b67a54e65424a1  ./results.162839/U0a.fq.gz
+8b4619fd39555cee4d5cca430d999379  ./results.156764/U0a.fq.gz
+8b4619fd39555cee4d5cca430d999379  ./results.153722/U0a.fq.gz
+a90dd1e71c9e5432e8b67a54e65424a1  ./results.158278/U0a.fq.gz
+a90dd1e71c9e5432e8b67a54e65424a1  ./results.151555/U0a.fq.gz
+a90dd1e71c9e5432e8b67a54e65424a1  ./results.161314/U0a.fq.gz
+#+end_example
+
+It creates three different outputs.
+Searching the github I found related issues: https://github.com/OpenGene/fastp/issues/506.
+Removing the fastp step gave the consistent alignment and variant call results.
+
+* Appendix I: In single line
+:PROPERTIES:
+:APPENDIX: t
+:UNNUMBERED: t
+:END:
+[[https://en.wikipedia.org/wiki/Marquee_element][Marquee element]] support is deprecated so there  is a [[https://codepen.io/pprakash/pen/oNxNeQE][custom javascript]].
+
+#+html: <a onClick='stopMarquee(".marquee");'> You can stop by clicking here. </a>
+
+** div
+#+BEGIN_SRC sh
+bwa mem -t "$THREADS" -R "@RG\tID:$SAMPLE\tSM:$SAMPLE\tPL:illumina\tLB:lib1\tPU:foo" "$REFERENCE" "$R1" "$R2" 2>"$OUTPUT.$$.bwa.log" | samtools collate -@ "$THREADS" -O - | samtools fixmate -@ "$THREADS" -m - - | samtools sort -@ "$THREADS" - 2>"$OUTPUT.$$.samtools.log" | ([ "$AMPLICON" = "NO" ] && samtools markdup -@ "$THREADS" - - || cat) | samtools view -C -T "$REFERENCE" - | tee "$OUTPUT.cram" | bcftools mpileup --threads "$THREADS" -Ou -A -T "$TARGET" -d 10000 -L 10000 -a "FORMAT/AD,FORMAT/DP" -f "$REFERENCE" - 2>>"$OUTPUT.$$.bcftools.log" | bcftools call --threads "$THREADS" -Ou --ploidy "$ASSEMBLY" -mv | bcftools view -i 'FORMAT/DP>5&&QUAL>5' | bcftools norm --threads "$THREADS" -Ou -m-any --check-ref w -f "$REFERENCE" 2>>"$OUTPUT.$$.bcftools.log" | bcftools +fill-tags -Ou -- -t all 2>>"$OUTPUT.$$.bcftools.log" | bcftools +setGT -Ou -- -t q -n c:'0/1' -i 'VAF>=.1' 2>>"$OUTPUT.$$.bcftools.log" | bcftools +setGT -Ov -- -t q -n c:'1/1' -i 'VAF>=.75' 2>>"$OUTPUT.$$.bcftools.log" | /home/bar/ensembl-vep/vep --everything --force_overwrite --vcf --pick --format vcf --fork $THREADS --stats_file "$OUTPUT"_summary.html --warning_file "$OUTPUT"_warnings.txt --output_file STDOUT --cache 2>"$OUTPUT.$$.vep.log" | bcftools +split-vep -c SYMBOL,gnomADg_AF:Float,IMPACT,Existing_variation 2>>"$OUTPUT.$$.bcftools.log" | bcftools filter --threads "$THREADS" -Ou -m+ -s 'onTarget' -M "$TARGET" | bcftools filter --threads "$THREADS" -Ou -m+ -s 'lowQual' -g3 -G10 -e 'FORMAT/DP<=15 || QUAL<=20' | bcftools filter --threads "$THREADS" -Ou -m+ -s 'highFreq' -e 'gnomADg_AF>0.001' | bcftools filter --threads "$THREADS" -Ou -m+ -s 'lowIMPACT' -i 'IMPACT~"HIGH" || IMPACT~"MODERATE"' | bcftools filter --threads "$THREADS" -Ou -m+ -s 'HOMrare' -e 'GT="1/1" && (gnomADg_AF <= 0.001 || (Existing_variation="." && gnomADg_AF="." && ID="."))' | bcftools filter --threads "$THREADS" -Ob -m+ -s 'HETnovel' -e 'GT="0/1" && Existing_variation="." && gnomADg_AF="." && ID="."' | tee "$OUTPUT.bcf" | bcftools +split-vep -f "$columns" -d -i 'CANONICAL~"YES"' 2>>"$OUTPUT.$$.bcftools.log" | awk -v header="$header" 'BEGIN {printf  header} 1' | gzip -c >"$OUTPUT.tsv.gz"
+#+END_SRC
+
+* Appendix II: Setting up tools and data
+:PROPERTIES:
+:APPENDIX: t
+:UNNUMBERED: t
+:END:
+
+We are going to need fastqc, fastp, bwa, samtools, bcftools, tabix, bedtools, ensembl-vep and multiqc.
+I created small scripts with dependencies as I was trying to create containers with some of them.
+Some of them are just installed from debian repos.
+
+**** fastqc bedtools tabix
+#+BEGIN_SRC sh :tangle ./install.sh :comments both
+apt update -y
+apt install -y fastqc tabix bedtools
+#+END_SRC
+
+**** ggplot2
+Debian packages lots of R packages so we don't have to compile it.
+
+#+BEGIN_SRC sh :tangle ./install.sh :comments both
+apt update -y
+apt install -y r-cran-ggplot2
+#+END_SRC
+
+**** multiqc and igv-reports
+Debian also packages multiqc but it is version 1.4 which doesn't have software version or custom image module we are using.
+In order to get the latest version of multiqc we need to spin up a virtual environment.
+IGV-reports is also a python package we can use the same environment while installing.
+
+#+BEGIN_SRC sh :tangle ./install.sh :comments both
+apt update -y
+apt install -y python3-virtualenv
+virtualenv -p python3 venv
+source venv/bin/activate
+pip install -U multiqc igv-reports
+#+END_SRC
+
+**** fastp
+#+BEGIN_SRC sh :tangle ./install.sh :comments both
+apt update -y
+apt install -y wget
+wget http://opengene.org/fastp/fastp -O /usr/bin/fastp
+chmod a+x /usr/bin/fastp
+#+END_SRC
+
+**** BWA
+#+BEGIN_SRC sh :tangle ./install.sh :comments both
+apt update -y
+apt install -y git gcc zlib1g-dev make
+git clone https://github.com/lh3/bwa
+cd bwa
+make
+cp ./bwa /usr/local/bin/
+cd ..
+rm -rf bwa
+#+END_SRC
+
+**** samtools
+#+BEGIN_SRC sh :tangle ./install.sh :comments both
+apt update -y
+apt install -y \
+  git gcc zlib1g-dev autoconf make \
+  liblzma-dev libbz2-dev libcurl4-openssl-dev
+git clone --recurse-submodules https://github.com/samtools/htslib.git
+git clone https://github.com/samtools/samtools
+
+cd samtools
+autoheader
+autoconf -Wno-syntax
+./configure --without-curses
+make
+make install
+cd ..
+rm -rf samtools
+rm -rf htslib
+#+END_SRC
+
+**** bcftools
+#+BEGIN_SRC sh :tangle ./install.sh :comments both
+apt update -y
+apt install -y \
+  git gcc zlib1g-dev autoconf make \
+  liblzma-dev libbz2-dev libperl-dev \
+  libgsl-dev libcurl4-openssl-dev
+git clone --recurse-submodules https://github.com/samtools/htslib.git
+git clone https://github.com/samtools/bcftools
+
+cd bcftools
+autoheader && autoconf && ./configure --enable-libgsl --enable-perl-filters
+make
+make install
+cd ..
+rm -rf bcftools
+rm -rf htslib
+#+END_SRC
+
+**** ensembl-vep
+Installing the vep cache takes time...
+
+#+BEGIN_SRC sh :tangle ./install.sh :comments both
+apt install -y \
+    zlib1g-dev libbz2-dev liblzma-dev gcc \
+    libmodule-build-perl libjson-perl libdbi-perl \
+    libset-intervaltree-perl build-essential make \
+    automake git unzip autoconf libdbd-mysql-perl \
+
+git clone https://github.com/Ensembl/ensembl-vep.git
+cd ensembl-vep
+perl INSTALL.pl -a acf -s homo_sapiens -y GRCh38 (ref:vep_install)
+#+END_SRC
+
+**** downloading the reference genome
+#+BEGIN_SRC sh :tangle ./download.sh :comments both
+apt update -y
+apt install -y wget
+
+cd
+mkdir -p reference/GRCh38
+cd reference/GRCh38
+wget https://storage.googleapis.com/genomics-public-data/resources/broad/hg38/v0/Homo_sapiens_assembly38.dict
+wget https://storage.googleapis.com/genomics-public-data/resources/broad/hg38/v0/Homo_sapiens_assembly38.fasta
+wget https://storage.googleapis.com/genomics-public-data/resources/broad/hg38/v0/Homo_sapiens_assembly38.fasta.64.alt
+wget https://storage.googleapis.com/genomics-public-data/resources/broad/hg38/v0/Homo_sapiens_assembly38.fasta.64.amb
+wget https://storage.googleapis.com/genomics-public-data/resources/broad/hg38/v0/Homo_sapiens_assembly38.fasta.64.ann
+wget https://storage.googleapis.com/genomics-public-data/resources/broad/hg38/v0/Homo_sapiens_assembly38.fasta.64.bwt
+wget https://storage.googleapis.com/genomics-public-data/resources/broad/hg38/v0/Homo_sapiens_assembly38.fasta.64.pac
+wget https://storage.googleapis.com/genomics-public-data/resources/broad/hg38/v0/Homo_sapiens_assembly38.fasta.64.sa
+wget https://storage.googleapis.com/genomics-public-data/resources/broad/hg38/v0/Homo_sapiens_assembly38.fasta.fai
+cd
+#+END_SRC
+
+**** downloading the sample data and target file
+#+BEGIN_SRC sh :tangle ./download.sh :comments both
+cd
+mkdir -p sample
+cd sample
+wget https://ftp-trace.ncbi.nlm.nih.gov/ReferenceSamples/giab/data/NA12878/NIST_NA12878_HG001_HiSeq_300x/131219_D00360_005_BH814YADXX/Project_RM8398/Sample_U0a/U0a_CGATGT_L001_R1_005.fastq.gz
+wget https://ftp-trace.ncbi.nlm.nih.gov/ReferenceSamples/giab/data/NA12878/NIST_NA12878_HG001_HiSeq_300x/131219_D00360_005_BH814YADXX/Project_RM8398/Sample_U0a/U0a_CGATGT_L001_R2_005.fastq.gz
+cd "$HOME"/reference/GRCh38
+wget https://ftp-trace.ncbi.nlm.nih.gov/ReferenceSamples/giab/release/references/GRCh38/resources/hg38.refGene.exon.bed.gz
+#+END_SRC
+
+***** Preprocess the target file
+We add some padding to the panel file
+
+#+BEGIN_SRC sh :tangle ./download.sh :comments both
+PADDING=100
+wget https://hgdownload.cse.ucsc.edu/goldenpath/hg38/bigZips/hg38.chrom.sizes
+
+bedtools slop -i hg38.refGene.exon.bed -g hg38.chrom.sizes -b $PADDING > hg38.refGene.exon_padding.bed
+#+END_SRC
+
+
+
+* Oneliner :noexport:
+#+name: oneliner
+#+BEGIN_SRC sh -r -n
+# fastp --in1 "$R1" --in2 "$R2" --stdout --html $OUTPUT.fastp.html --json $OUTPUT.fastp.json 2>$OUTPUT.$$.fastp.log | (ref:fastp)
+bwa mem -t "$THREADS" -R "@RG\tID:$SAMPLE\tSM:$SAMPLE\tPL:illumina\tLB:lib1\tPU:foo" "$REFERENCE" "$R1" "$R2" 2>"$OUTPUT.$$.bwa.log" | (ref:bwa)
+    # pv -cN bwa -s "$(gzip -l "$R1" "$R2" | awk '{print $2}' | tail -n1)" | (ref:pv)
+    samtools collate -@ "$THREADS" -O - | (ref:samtools_collate)
+    samtools fixmate -@ "$THREADS" -m - - | (ref:samtools_fixmate)
+    samtools sort -@ "$THREADS" - 2>"$OUTPUT.$$.samtools.log" | (ref:samtools_sort)
+    # pv -cN samtools_sort |
+    ([ "$AMPLICON" = "NO" ] && samtools markdup -@ "$THREADS" - - || cat) | (ref:samtools_markdup)
+    # pv -cN samtools_markdup |
+    samtools view -C -T "$REFERENCE" - | (ref:samtools_view)
+    tee "$OUTPUT.cram" | (ref:tee_cram)
+    bcftools mpileup --threads "$THREADS" -Ou -A -T "$TARGET" -d 10000 -L 10000 -a "FORMAT/AD,FORMAT/DP" -f "$REFERENCE" - 2>>"$OUTPUT.$$.bcftools.log" | (ref:bcftools_mpileup)
+    # pv -cN bcftools_mpileup |
+    bcftools call --threads "$THREADS" -Ou --ploidy "$ASSEMBLY" -mv | (ref:bcftools_call)
+    # pv -cN bcftools_call |
+    bcftools view -i 'FORMAT/DP>5&&QUAL>5' | (ref:bcftools_view)
+    bcftools norm --threads "$THREADS" -Ou -m-any --check-ref w -f "$REFERENCE" 2>>"$OUTPUT.$$.bcftools.log" | (ref:bcftools_norm)
+    bcftools +fill-tags -Ou -- -t all 2>>"$OUTPUT.$$.bcftools.log" | (ref:bcftools_fill-tags)
+    bcftools +setGT -Ou -- -t q -n c:'0/1' -i 'VAF>=.1' 2>>"$OUTPUT.$$.bcftools.log" | (ref:bcftools_setGT_1)
+    bcftools +setGT -Ov -- -t q -n c:'1/1' -i 'VAF>=.75' 2>>"$OUTPUT.$$.bcftools.log" | (ref:bcftools_setGT_2)
+    /home/bar/ensembl-vep/vep --everything --force_overwrite --vcf --pick --format vcf \ (ref:vep)
+        --fork $THREADS \
+        --stats_file "$OUTPUT"_summary.html \
+        --warning_file "$OUTPUT"_warnings.txt \
+        --output_file STDOUT --cache 2>"$OUTPUT.$$.vep.log" |
+    # pv -cN vep |
+    bcftools +split-vep -c SYMBOL,gnomADg_AF:Float,IMPACT,Existing_variation 2>>"$OUTPUT.$$.bcftools.log" | (ref:split-vep_1)
+    bcftools filter --threads "$THREADS" -Ou -m+ -s 'onTarget' -M "$TARGET" | (ref:filter_OnTarget)
+    bcftools filter --threads "$THREADS" -Ou -m+ -s 'lowQual' -g3 -G10 -e 'FORMAT/DP<=15 || QUAL<=20' | (ref:filter_LowQual)
+    bcftools filter --threads "$THREADS" -Ou -m+ -s 'highFreq' -e 'gnomADg_AF>0.001' | (ref:filter_Freq)
+    bcftools filter --threads "$THREADS" -Ou -m+ -s 'lowIMPACT' -i 'IMPACT~"HIGH" || IMPACT~"MODERATE"' | (ref:filter_Impact)
+    bcftools filter --threads "$THREADS" -Ou -m+ -s 'HOMrare' -e 'GT="1/1" && (gnomADg_AF <= 0.001 || (Existing_variation="." && gnomADg_AF="." && ID="."))' | (ref:filter_HomRare)
+    bcftools filter --threads "$THREADS" -Ob -m+ -s 'HETnovel' -e 'GT="0/1" && Existing_variation="." && gnomADg_AF="." && ID="."' | (ref:filter_HetNovel)
+    tee "$OUTPUT.bcf" | (ref:tee_bcf)
+    bcftools +split-vep -f "$columns" -d -i 'CANONICAL~"YES"' 2>>"$OUTPUT.$$.bcftools.log" | (ref:split-vep_2)
+    awk -v header="$header" 'BEGIN {printf  header} 1' | (ref:awk)
+    gzip -c >"$OUTPUT.tsv.gz" (ref:gzip)
+#+END_SRC
+
+
+* Oneliner.sh :noexport:
+Copyright 2023 Barış Salman
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of
+this software and associated documentation files (the “Software”), to deal in
+the Software without restriction, including without limitation the rights to
+use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software is furnished to do so,
+subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+AUTHOR="Barış Salman"
+EMAIL="barslmn@gmail.com"
+
+#+BEGIN_SRC sh -r :tangle oneliner.sh :noweb yes :comments both :shebang #!/bin/sh
+
+set -eu
+
+VERSION="v1.0.0"
+
+<<setting_environment>>
+
+<<monitor_resource_usage>>
+
+<<oneliner>>
+
+<<getting_versions>>
+
+<<getting_stats>>
+#+END_SRC

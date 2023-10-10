@@ -1,5 +1,5 @@
 #!/bin/sh
-# Oneliner :noexport:
+# Oneliner.sh :noexport:
 # Copyright 2023 Barış Salman
 
 # Permission is hereby granted, free of charge, to any person obtaining a copy of
@@ -23,7 +23,7 @@
 # EMAIL="barslmn@gmail.com"
 
 
-# [[file:ngsoneliners.org::*Oneliner][Oneliner:1]]
+# [[file:ngsoneliners.org::*Oneliner.sh][Oneliner.sh:1]]
 set -eu
 
 VERSION="v1.0.0"
@@ -67,7 +67,7 @@ monitor_resources &
 
 fastp --in1 "$R1" --in2 "$R2" --stdout --html $OUTPUT.fastp.html --json $OUTPUT.fastp.json 2>$OUTPUT.$$.fastp.log |
     pv -cN fastp -s "$(gzip -l "$R1" "$R2" | awk '{print $2}' | tail -n1)" |
-    bwa mem -p -t "$THREADS" -R "@RG\tID:name_placeholder\tSM:name_placeholder\tPL:illumina\tLB:lib1\tPU:foo" "$REFERENCE" - 2>"$OUTPUT.$$.bwa.log" |
+    bwa mem -p -t "$THREADS" -R "@RG\tID:$SAMPLE\tSM:$SAMPLE\tPL:illumina\tLB:lib1\tPU:foo" "$REFERENCE" - 2>"$OUTPUT.$$.bwa.log" |
     pv -cN bwa |
     samtools collate -@ "$THREADS" -O - |
     samtools fixmate -@ "$THREADS" -m - - |
@@ -116,13 +116,24 @@ fastp --in1 "$R1" --in2 "$R2" --stdout --html $OUTPUT.fastp.html --json $OUTPUT.
         echo "annotation_sources:"
         ~/ensembl-vep/vep --show_cache_info | sed 's/\s/: "/;s/$/"/;s/^/    /'
     )
-} >oneliner_mqc_versions.yaml
+} > "$OUTPUT_DIR"/oneliner_mqc_versions.yaml
 
 samtools index -@ $THREADS "$OUTPUT.cram"
+bcftools index "$OUTPUT.bcf"
+
+source ~/venv/bin/activate
+
+create_report "$OUTPUT".bcf \
+    http://igv-genepattern-org.s3.amazonaws.com/genomes/seq/hg38/hg38.fa \
+    --genome hg38 --flanking 1000 \
+    --sample-columns GT AD DP VAF \
+    --info-columns SYMBOL gnomADg_AF IMPACT Existing_variation \
+    --tracks "$OUTPUT".cram --output "$OUTPUT"_mqc.html
+
 samtools stats --reference "$REFERENCE" "$OUTPUT.cram" >"$OUTPUT.cram.stats"
 samtools idxstats "$OUTPUT.cram" >"$OUTPUT.cram.idxstats"
 samtools flagstat "$OUTPUT.cram" >"$OUTPUT.cram.flagstat"
 bcftools stats "$OUTPUT.bcf" >"$OUTPUT.bcf.stats"
 "$BASEDIR"/plot_resource_usage.R "$OUTPUT_DIR"
 multiqc -f -s -o "$OUTPUT_DIR" "$OUTPUT_DIR"
-# Oneliner:1 ends here
+# Oneliner.sh:1 ends here

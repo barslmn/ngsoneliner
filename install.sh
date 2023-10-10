@@ -14,18 +14,19 @@ apt update -y
 apt install -y r-cran-ggplot2
 # ggplot2:1 ends here
 
-# multiqc
+# multiqc and igv-reports
 # Debian also packages multiqc but it is version 1.4 which doesn't have software version or custom image module we are using.
 # In order to get the latest version of multiqc we need to spin up a virtual environment.
+# IGV-reports is also a python package we can use the same environment while installing.
 
 
-# [[file:ngsoneliners.org::*multiqc][multiqc:1]]
+# [[file:ngsoneliners.org::*multiqc and igv-reports][multiqc and igv-reports:1]]
 apt update -y
 apt install -y python3-virtualenv
 virtualenv -p python3 venv
 source venv/bin/activate
-pip install -U multiqc
-# multiqc:1 ends here
+pip install -U multiqc igv-reports
+# multiqc and igv-reports:1 ends here
 
 # fastp
 
